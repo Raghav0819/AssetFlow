@@ -11,6 +11,7 @@ class User(Base):
     firebase_uid: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(
         Enum("Admin", "DeptHead", "AssetManager", "Employee", name="userrole"),
         nullable=False,

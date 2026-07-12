@@ -14,9 +14,13 @@ export default function Dashboard() {
   const [maintenance, setMaintenance] = useState<MaintenanceTrendData[] | null>(null);
   const [logs, setLogs] = useState<ActivityLog[] | null>(null);
   const [transfers, setTransfers] = useState<TransferRequest[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
+      setLoading(true);
+      setError(null);
       try {
         const [sum, util, maint, logList, trans] = await Promise.all([
           api.getDashboardSummary(),
@@ -32,12 +36,25 @@ export default function Dashboard() {
         setTransfers(trans);
       } catch (e) {
         console.error("Error loading dashboard data", e);
+        setError(e instanceof Error ? e.message : "Failed to load dashboard data.");
+      } finally {
+        setLoading(false);
       }
     }
     loadData();
   }, []);
 
-  if (!summary) return <div className="p-8 flex justify-center text-slate-500">Loading Dashboard...</div>;
+  if (loading) return <div className="p-8 flex justify-center text-slate-500">Loading Dashboard...</div>;
+
+  if (error || !summary) {
+    return (
+      <div className="p-8 flex flex-col items-center justify-center gap-3 text-center">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-sm max-w-md">
+          {error || "Dashboard data is unavailable."}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-2 space-y-6 max-w-7xl mx-auto bg-[#f8fafc] min-h-screen">

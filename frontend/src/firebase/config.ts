@@ -21,13 +21,19 @@ let firebaseApp: any = null;
 let firebaseAuth: any = null;
 let usingMock = false;
 
-// Mock user class to satisfy interface requirements
+// Mock user class to satisfy interface requirements — reflects whatever email
+// was actually submitted, instead of a fixed placeholder identity.
 class MockFirebaseUser {
-  uid = "mock-user-123";
-  email = "priya@example.com";
-  displayName = "Priya Sharma";
+  uid: string;
+  email: string;
+  displayName: string;
+  constructor(email: string) {
+    this.uid = `mock-${email.toLowerCase()}`;
+    this.email = email;
+    this.displayName = email.split("@")[0];
+  }
   async getIdToken() {
-    return "mock-firebase-token-123";
+    return `mock-firebase-token-${this.uid}`;
   }
 }
 
@@ -43,8 +49,8 @@ const mockAuth = {
       this._listeners = this._listeners.filter((l) => l !== callback);
     };
   },
-  async signInWithEmailAndPassword(_email: string) {
-    const user = new MockFirebaseUser() as unknown as FirebaseUser;
+  async signInWithEmailAndPassword(email: string) {
+    const user = new MockFirebaseUser(email) as unknown as FirebaseUser;
     this.currentUser = user;
     this._listeners.forEach((l) => l(user));
     return { user };

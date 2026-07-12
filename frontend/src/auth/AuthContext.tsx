@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -15,7 +16,7 @@ import {
   signOut,
   isMockAuth,
 } from "../firebase/config";
-import { api } from "../api/client";
+import { api, ApiClientError, clearStoredToken, setStoredToken } from "../api/client";
 import type { Role, SignupRequest } from "../types";
 
 // ─── Context shape ───
@@ -45,9 +46,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading: true,
   });
 
+  // While an explicit login()/signup() call is in flight, it already owns setting
+  // the final auth state — the onAuthStateChanged listener below fires as a side
+  // effect of the same sign-in and must not race it with a redundant, token-less
+  // api.me() call that would otherwise briefly overwrite it with fallback values.
+  const manualAuthInProgress = useRef(false);
+
   // Listen to Firebase auth state
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (manualAuthInProgress.current) return;
       if (fbUser) {
         try {
           const profile = await api.me();
@@ -63,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setState({
               firebaseUser: fbUser,
               role: "Admin",
-              userName: fbUser.displayName || "Priya Sharma",
+              userName: fbUser.displayName || "Guest User",
               loading: false,
             });
           } else {
@@ -90,30 +98,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    // 1. Firebase sign-in
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-
-    // 2. Backend login to get role
-    let role: any = "Admin";
-    let name = "Mock User";
+    manualAuthInProgress.current = true;
     try {
-      const res = await api.login({ email, password });
-      role = res.role;
-      name = res.name;
-    } catch (error) {
-      if (isMockAuth) {
-        console.log("Mock Mode: Backend API offline, using default Admin role.");
-      } else {
-        throw error;
-      }
-    }
+      // 1. Firebase sign-in
+      const cred = await signInWithEmailAndPassword(auth, email, password);
 
-    setState({
-      firebaseUser: cred.user,
-      role,
-      userName: name,
-      loading: false,
-    });
+      // 2. Backend login to get role + session token
+      let role: any = "Admin";
+      let name = "Mock User";
+      try {
+        const res = await api.login({ email, password });
+        role = res.role;
+        name = res.name;
+        setStoredToken(res.access_token);
+      } catch (error) {
+        // Only fall back to a default identity when the backend is genuinely
+        // unreachable — a real 401/403/etc. from the API means bad credentials
+        // and must surface as an error, not silently log the user in.
+        if (isMockAuth && !(error instanceof ApiClientError)) {
+          console.log("Mock Mode: Backend API offline, using default Admin role.");
+        } else {
+          throw error;
+        }
+      }
+
+      setState({
+        firebaseUser: cred.user,
+        role,
+        userName: name,
+        loading: false,
+      });
+    } finally {
+      manualAuthInProgress.current = false;
+    }
   };
 
   const signup = async (data: SignupRequest) => {
@@ -121,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Backend creates Firebase user + Postgres profile in one call
       await api.signup(data);
     } catch (error) {
-      if (isMockAuth) {
+      if (isMockAuth && !(error instanceof ApiClientError)) {
         console.log("Mock Mode: Backend API offline, bypassing backend registration.");
       } else {
         throw error;
@@ -133,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await signOut(auth);
+    clearStoredToken();
     setState({
       firebaseUser: null,
       role: null,

@@ -1,15 +1,14 @@
 """Demo seed data — seeded into Postgres on startup, with in-memory token store for
 quick demo auth (no Firebase needed during hackathon dev).
 
-NOTE: The actual DB has Integer primary keys and no password_hash column.
-Auth tokens are stored in-memory; the seed script authenticates via a simple
-demo password checked in Python (not stored in Postgres)."""
+Each user has their own password_hash in Postgres, checked at login. Seeded demo
+accounts all get DEMO_PASSWORD as their password so the sandbox login buttons keep
+working; real signups get whatever password the user chose."""
 
 from __future__ import annotations
 
 import json as _json
 import logging
-from uuid import uuid4
 
 from sqlalchemy import text
 
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 # ── In-memory stores ────────────────────────────────────────────────────────
 _users_by_token: dict[str, dict] = {}
-_demo_password_hash: str = hash_password(settings.demo_password)
 
 # ── Fixed seed data ─────────────────────────────────────────────────────────
 DEMO_USERS = [
@@ -74,16 +72,24 @@ async def seed_demo_data_to_db() -> None:
                     {"name": cat["name"], "schema": _json.dumps(cat["custom_fields_schema"])},
                 )
 
-        # Users
+        # Users — seeded with DEMO_PASSWORD so the sandbox login buttons work
+        demo_password_hash = hash_password(settings.demo_password)
         for user in DEMO_USERS:
-            existing = await session.execute(text("SELECT id FROM users WHERE email = :email"), {"email": user["email"]})
-            if existing.scalar() is None:
+            existing = await session.execute(text("SELECT id, password_hash FROM users WHERE email = :email"), {"email": user["email"]})
+            row = existing.mappings().first()
+            if row is None:
                 await session.execute(
                     text(
-                        "INSERT INTO users (firebase_uid, name, email, role, status) "
-                        "VALUES (:firebase_uid, :name, :email, :role, :status)"
+                        "INSERT INTO users (firebase_uid, name, email, role, status, password_hash) "
+                        "VALUES (:firebase_uid, :name, :email, :role, :status, :password_hash)"
                     ),
-                    user,
+                    {**user, "password_hash": demo_password_hash},
+                )
+            elif row["password_hash"] is None:
+                # Backfill accounts seeded before password_hash existed on the users table.
+                await session.execute(
+                    text("UPDATE users SET password_hash = :password_hash WHERE id = :id"),
+                    {"password_hash": demo_password_hash, "id": row["id"]},
                 )
 
         # Assets — link to first category (Laptops)
@@ -127,20 +133,22 @@ def get_user_by_token(token: str) -> dict | None:
 
 
 async def login_user(email: str, password: str) -> tuple[str, dict] | None:
-    """Authenticate: verify demo password in Python, lookup user in Postgres."""
-    if not verify_password(password, _demo_password_hash):
-        return None
-
+    """Authenticate against the user's own password_hash in Postgres."""
     async with async_session_maker() as session:
         result = await session.execute(
-            text("SELECT id, firebase_uid, name, email, role, department_id, status FROM users WHERE LOWER(email) = LOWER(:email)"),
+            text(
+                "SELECT id, firebase_uid, name, email, role, department_id, status, password_hash "
+                "FROM users WHERE LOWER(email) = LOWER(:email)"
+            ),
             {"email": email},
         )
         row = result.mappings().first()
-        if row is None:
+        if row is None or row["password_hash"] is None:
+            return None
+        if not verify_password(password, row["password_hash"]):
             return None
 
-        user_dict = dict(row)
+        user_dict = {k: v for k, v in dict(row).items() if k != "password_hash"}
         token = create_token()
         _users_by_token[token] = user_dict
         return token, user_dict
@@ -157,7 +165,7 @@ async def get_user_by_email(email: str) -> dict | None:
 
 
 async def create_employee_profile(name: str, email: str, password: str, department_id: int | None) -> dict:
-    """Create a new Employee user in Postgres (no password stored in DB)."""
+    """Create a new Employee user in Postgres, with their own chosen password hashed and stored."""
     async with async_session_maker() as session:
         existing = await session.execute(
             text("SELECT id FROM users WHERE LOWER(email) = LOWER(:email)"),
@@ -169,10 +177,16 @@ async def create_employee_profile(name: str, email: str, password: str, departme
         firebase_uid = f"firebase-{create_token()}"
         result = await session.execute(
             text(
-                "INSERT INTO users (firebase_uid, name, email, role, department_id, status) "
-                "VALUES (:firebase_uid, :name, :email, 'Employee', :department_id, 'Active') RETURNING id"
+                "INSERT INTO users (firebase_uid, name, email, role, department_id, status, password_hash) "
+                "VALUES (:firebase_uid, :name, :email, 'Employee', :department_id, 'Active', :password_hash) RETURNING id"
             ),
-            {"firebase_uid": firebase_uid, "name": name, "email": email, "department_id": department_id},
+            {
+                "firebase_uid": firebase_uid,
+                "name": name,
+                "email": email,
+                "department_id": department_id,
+                "password_hash": hash_password(password),
+            },
         )
         user_id = result.scalar()
         await session.commit()

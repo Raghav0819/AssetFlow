@@ -1,4 +1,4 @@
-import { auth, isMockAuth } from "../firebase/config";
+import { isMockAuth } from "../firebase/config";
 import type {
   LoginRequest,
   LoginResponse,
@@ -41,13 +41,29 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+// ─── Backend session token (issued by /auth/login, distinct from the Firebase identity token) ───
+
+const TOKEN_STORAGE_KEY = "assetflow_access_token";
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function setStoredToken(token: string): void {
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export function clearStoredToken(): void {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
 // ─── Generic fetch wrapper ───
 
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = await auth.currentUser?.getIdToken();
+  const token = getStoredToken();
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -502,92 +518,36 @@ export const api = {
     return request<UserProfile>("/me");
   },
 
-  // ─── Departments ───
+  // ─── Departments (backed by the real API — Postgres) ───
   async getDepartments(): Promise<Department[]> {
-    if (isMockAuth) {
-      const depts = db.getDepts();
-      const emps = db.getEmps();
-      // Join helper fields
-      return depts.map((d) => {
-        const parent = depts.find((p) => p.id === d.parent_department_id);
-        const head = emps.find((e) => e.id === d.department_head_id);
-        return {
-          ...d,
-          parent_name: parent ? parent.name : null,
-          head_name: head ? head.name : null,
-        };
-      });
-    }
     return request<Department[]>("/departments");
   },
 
   async createDepartment(data: DepartmentCreate): Promise<Department> {
-    if (isMockAuth) {
-      const depts = db.getDepts();
-      const newDept: Department = {
-        id: `dept-${Date.now()}`,
-        ...data,
-      };
-      depts.push(newDept);
-      db.saveDepts(depts);
-      return newDept;
-    }
     return request<Department>("/departments", {
       method: "POST",
       body: JSON.stringify(data),
     });
   },
 
-  // ─── Categories ───
+  // ─── Categories (backed by the real API — Postgres) ───
   async getCategories(): Promise<Category[]> {
-    if (isMockAuth) {
-      return db.getCats();
-    }
     return request<Category[]>("/categories");
   },
 
   async createCategory(data: CategoryCreate): Promise<Category> {
-    if (isMockAuth) {
-      const cats = db.getCats();
-      const newCat: Category = {
-        id: `cat-${Date.now()}`,
-        ...data,
-      };
-      cats.push(newCat);
-      db.saveCats(cats);
-      return newCat;
-    }
     return request<Category>("/categories", {
       method: "POST",
       body: JSON.stringify(data),
     });
   },
 
-  // ─── Employees / Directory ───
+  // ─── Employees / Directory (backed by the real API — Postgres) ───
   async getEmployees(): Promise<Employee[]> {
-    if (isMockAuth) {
-      const emps = db.getEmps();
-      const depts = db.getDepts();
-      return emps.map((e) => {
-        const dept = depts.find((d) => d.id === e.department_id);
-        return {
-          ...e,
-          department_name: dept ? dept.name : null,
-        };
-      });
-    }
     return request<Employee[]>("/employees");
   },
 
   async updateEmployeeRole(id: string, role: Role): Promise<Employee> {
-    if (isMockAuth) {
-      const emps = db.getEmps();
-      const empIndex = emps.findIndex((e) => e.id === id);
-      if (empIndex === -1) throw new Error("Employee not found");
-      emps[empIndex].role = role;
-      db.saveEmps(emps);
-      return emps[empIndex];
-    }
     return request<Employee>(`/employees/${id}/role`, {
       method: "PATCH",
       body: JSON.stringify({ role }),
@@ -920,35 +880,8 @@ export const api = {
     });
   },
 
-  // ─── Dashboard & Reports ───
+  // ─── Dashboard (backed by the real API — Postgres) ───
   async getDashboardSummary(): Promise<DashboardSummary> {
-    if (isMockAuth) {
-      const assets = db.getAssets();
-      const bookings = db.getBookings();
-      const allocs = db.getAllocations();
-
-      const today = new Date();
-      const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-      const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
-
-      const bookingsToday = bookings.filter(b => {
-        const bStart = new Date(b.start_time).getTime();
-        return bStart >= startOfDay && bStart < endOfDay && b.status !== "Cancelled";
-      }).length;
-
-      const overdueAllocations = allocs.filter(a => {
-        if (a.status !== "Active" || !a.expected_return_date) return false;
-        return new Date(a.expected_return_date).getTime() < today.getTime();
-      }).length;
-
-      return {
-        total_assets: assets.length,
-        available_assets: assets.filter(a => a.status === "Available").length,
-        allocated_assets: assets.filter(a => a.status === "Allocated").length,
-        bookings_today: bookingsToday,
-        overdue_allocations: overdueAllocations,
-      };
-    }
     return request<DashboardSummary>("/dashboard/summary");
   },
 
