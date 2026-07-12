@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, status
 
-from app.core.deps import require_role
+from app.core.deps import get_current_user, require_role
 from app.db.seed import create_category, list_categories
 from app.schemas.organization import CategoryCreateRequest, CategoryResponse
 
 router = APIRouter(tags=["categories"])
 
 
-@router.get("/categories", response_model=list[CategoryResponse])
+@router.get("/categories", response_model=list[CategoryResponse], dependencies=[Depends(get_current_user)])
 async def get_categories() -> list[dict]:
     return await list_categories()
 

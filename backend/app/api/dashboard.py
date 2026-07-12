@@ -1,14 +1,15 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from sqlalchemy import text
 
+from app.core.deps import get_current_user
 from app.db.session import async_session_maker
 from app.schemas.dashboard import DashboardSummaryResponse
 
 router = APIRouter(tags=["dashboard"])
 
 
-@router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
+@router.get("/dashboard/summary", response_model=DashboardSummaryResponse, dependencies=[Depends(get_current_user)])
 async def summary() -> dict[str, int]:
     """Return live KPI counts from Postgres — no hardcoded values."""
     async with async_session_maker() as session:

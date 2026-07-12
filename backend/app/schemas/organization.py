@@ -3,16 +3,16 @@ from pydantic import BaseModel, Field
 
 class DepartmentCreateRequest(BaseModel):
     name: str = Field(min_length=1)
-    parent_department_id: str | None = None
-    department_head_id: str | None = None
+    parent_department_id: int | None = None
+    department_head_id: int | None = None
     status: str = Field(default="Active")
 
 
 class DepartmentResponse(BaseModel):
-    id: str
+    id: int
     name: str
-    parent_department_id: str | None = None
-    department_head_id: str | None = None
+    parent_department_id: int | None = None
+    department_head_id: int | None = None
     status: str
 
 
@@ -22,19 +22,19 @@ class CategoryCreateRequest(BaseModel):
 
 
 class CategoryResponse(BaseModel):
-    id: str
+    id: int
     name: str
-    custom_fields_schema: list[dict[str, str]]
+    custom_fields_schema: list[dict[str, str]] | None = None
 
 
 class EmployeeResponse(BaseModel):
-    id: str
+    id: int
     firebase_uid: str
     name: str
     email: str
     role: str
     status: str
-    department_id: str | None = None
+    department_id: int | None = None
 
 
 class EmployeeRoleUpdateRequest(BaseModel):

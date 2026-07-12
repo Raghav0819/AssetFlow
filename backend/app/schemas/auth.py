@@ -10,7 +10,7 @@ class SignupRequest(BaseModel):
     name: str = Field(min_length=1)
     email: str
     password: str = Field(min_length=8)
-    department_id: str | None = None
+    department_id: int | None = None
 
 
 class AuthResponse(BaseModel):
@@ -20,7 +20,7 @@ class AuthResponse(BaseModel):
 
 
 class PublicUserResponse(BaseModel):
-    id: str
+    id: int
     name: str
     email: str
     role: str
@@ -29,4 +29,4 @@ class PublicUserResponse(BaseModel):
 
 class CurrentUserResponse(PublicUserResponse):
     firebase_uid: str
-    department_id: str | None = None
+    department_id: int | None = None

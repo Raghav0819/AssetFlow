@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, status
 
-from app.core.deps import require_role
+from app.core.deps import get_current_user, require_role
 from app.db.seed import create_department, list_departments
 from app.schemas.organization import DepartmentCreateRequest, DepartmentResponse
 
 router = APIRouter(tags=["departments"])
 
 
-@router.get("/departments", response_model=list[DepartmentResponse])
+@router.get("/departments", response_model=list[DepartmentResponse], dependencies=[Depends(get_current_user)])
 async def get_departments() -> list[dict]:
     return await list_departments()
 
